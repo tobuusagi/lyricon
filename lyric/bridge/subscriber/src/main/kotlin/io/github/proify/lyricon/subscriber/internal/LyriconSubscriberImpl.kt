@@ -221,15 +221,20 @@ internal class LyriconSubscriberImpl(
             if (destroyed.get()) return
             status = SubscriberStatus.CONNECTING
             binder.beginAttempt(attempt)
-            context.sendBroadcast(Intent(SubscriberConstants.ACTION_REGISTER_SUBSCRIBER).apply {
-                setPackage(SubscriberConstants.SYSTEM_UI_PACKAGE_NAME)
-                putExtra(
-                    SubscriberConstants.EXTRA_BUNDLE,
-                    Bundle().apply {
-                        putBinder(SubscriberConstants.EXTRA_BINDER, binder)
-                    }
-                )
-            })
+            val dispatcher = broadcastDispatcher
+            if (dispatcher != null) {
+                dispatcher(context, SubscriberConstants.ACTION_REGISTER_SUBSCRIBER, binder)
+            } else {
+                context.sendBroadcast(Intent(SubscriberConstants.ACTION_REGISTER_SUBSCRIBER).apply {
+                    setPackage(SubscriberConstants.SYSTEM_UI_PACKAGE_NAME)
+                    putExtra(
+                        SubscriberConstants.EXTRA_BUNDLE,
+                        Bundle().apply {
+                            putBinder(SubscriberConstants.EXTRA_BINDER, binder)
+                        }
+                    )
+                })
+            }
             scheduleTimeout()
         }
 
@@ -250,9 +255,15 @@ internal class LyriconSubscriberImpl(
         }
     }
 
-    private companion object {
+    companion object {
         private const val TAG = "LyriconSubscriberImpl"
         private const val MAX_RETRY_COUNT = 3
         private const val CONNECT_TIMEOUT_MS = 3_000L
+
+        /**
+         * 单元测试 Seam：在 android.jar stub 环境中允许测试拦截并分发真实的订阅端注册意图。
+         */
+        @androidx.annotation.VisibleForTesting
+        internal var broadcastDispatcher: ((Context, String, RegistrationBinder) -> Unit)? = null
     }
 }

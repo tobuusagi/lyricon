@@ -83,6 +83,14 @@ object LyricViewController : ActivePlayerListener,
         NotificationCoverHelper.registerListener(this)
     }
 
+    @androidx.annotation.VisibleForTesting
+    fun resetForTesting() {
+        isPlaying = false
+        activePackage = ""
+        currentSong = null
+        currentLogicPosition = 0
+    }
+
     /**
      * 当歌曲发生切换时回调。
      * @param song 新歌曲对象，若停止播放则为 null
@@ -94,6 +102,9 @@ object LyricViewController : ActivePlayerListener,
         updateAllControllers {
             lyricView.setSong(song)
             refreshTranslationVisibility(lyricView)
+            if (song == null) {
+                onPlaybackStopped()
+            }
         }
 
         updateCoverFileFromSong(song)
@@ -137,7 +148,10 @@ object LyricViewController : ActivePlayerListener,
         YLog.info(TAG, "onPlaybackStateChanged: $isPlaying")
 
         this.isPlaying = isPlaying
-        updateAllControllers { lyricView.setPlaying(isPlaying) }
+        updateAllControllers {
+            lyricView.setPlaying(isPlaying)
+            onPlaybackStateChanged(isPlaying)
+        }
     }
 
     /**

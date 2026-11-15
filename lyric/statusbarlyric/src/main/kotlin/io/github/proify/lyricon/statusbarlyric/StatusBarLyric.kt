@@ -193,6 +193,12 @@ class StatusBarLyric(
     private var isOplusCapsuleShowing: Boolean = false
 
     var onPlayingChanged: ((Boolean) -> Unit)? = null
+    var onLyricVisibilityChanged: ((Boolean) -> Unit)? = null
+
+    /** 记录实际测量约束高度，用于在测试环境中验证防挤压防护 */
+    @androidx.annotation.VisibleForTesting
+    var effectiveMeasuredHeight: Int = 0
+        internal set
 
     // 上一次 Logo gravity，用于避免重复重排
     private var lastLogoGravity: Int = -114
@@ -381,12 +387,14 @@ class StatusBarLyric(
 
         if (enableEnterAnim && shouldShow && !lastDisabledVisible) {
             isVisible = shouldShow
+            onLyricVisibilityChanged?.invoke(shouldShow)
             postDelayed({
                 triggerSingleVisibilityLayoutTransition()
                 logoView.forceHide = false
             }, 0)
         } else {
             isVisible = shouldShow
+            onLyricVisibilityChanged?.invoke(shouldShow)
             logoView.forceHide = enableEnterAnim && !shouldShow && !isDisabledVisible
         }
 
@@ -625,14 +633,38 @@ class StatusBarLyric(
         textView.layoutParams = lp
     }
 
-    private fun ensureLayoutParams(): LayoutParams {
-        val lp = layoutParams as? LayoutParams
-            ?: LayoutParams(
-                LayoutParams.WRAP_CONTENT,
-                LayoutParams.MATCH_PARENT
-            )
-        if (layoutParams == null) layoutParams = lp
+    private var customLayoutParams: ViewGroup.LayoutParams? = null
+
+    override fun getLayoutParams(): ViewGroup.LayoutParams? {
+        return customLayoutParams ?: super.getLayoutParams()
+    }
+
+    override fun setLayoutParams(params: ViewGroup.LayoutParams?) {
+        super.setLayoutParams(params)
+        customLayoutParams = params
+    }
+
+    private fun ensureLayoutParams(): ViewGroup.MarginLayoutParams {
+        val currentLp = layoutParams
+        if (currentLp is ViewGroup.MarginLayoutParams) {
+            return currentLp
+        }
+        val lp = LayoutParams(
+            LayoutParams.WRAP_CONTENT,
+            LayoutParams.WRAP_CONTENT
+        )
+        layoutParams = lp
         return lp
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        effectiveMeasuredHeight = measuredHeight
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun performMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
     private fun triggerSingleTransition() {

@@ -50,7 +50,7 @@ configure<ApplicationExtension> {
 
     buildTypes {
         getByName("debug") {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = null
         }
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")

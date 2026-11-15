@@ -15,6 +15,16 @@ import io.github.proify.lyricon.central.internal.CentralConstants
 import io.github.proify.lyricon.central.internal.util.ScreenStateMonitor
 
 /**
+ * 单元测试意图封装：携带 Binder 实例以便在跨进程意图受限的测试环境中分发。
+ */
+open class RegistrationIntent(
+    private val registrationAction: String,
+    val binder: android.os.IBinder
+) : Intent(registrationAction) {
+    override fun getAction(): String = registrationAction
+}
+
+/**
  * 中央桥接管理对象。
  *
  * 负责初始化全局 Context，并管理核心广播通信：
@@ -60,5 +70,18 @@ object BridgeCentral {
     fun sendBootCompleted() {
         if (!::context.isInitialized) return
         context.sendBroadcast(Intent(CentralConstants.ACTION_CENTRAL_BOOT_COMPLETED))
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun resetForTesting(appContext: Context? = null) {
+        if (appContext != null) {
+            context = appContext.applicationContext
+        }
+        CentralRuntime.resetForTesting()
+    }
+
+    @androidx.annotation.VisibleForTesting
+    fun handleRegistrationForTesting(intent: Intent) {
+        receiver.onReceive(if (::context.isInitialized) context else null, intent)
     }
 }

@@ -43,6 +43,12 @@ configure<LibraryExtension> {
         buildConfig = true
         aidl = true
     }
+
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -57,6 +63,7 @@ dependencies {
     implementation(project(":opencc-lite"))
 
     compileOnly(libs.libxposed.api)
+    testImplementation(libs.libxposed.api)
     implementation(libs.libxposed.service)
 
     implementation(libs.kotlinx.serialization.json)
@@ -64,6 +71,7 @@ dependencies {
     implementation(libs.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(project(":lyric:bridge:provider"))
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }

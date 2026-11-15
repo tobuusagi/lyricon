@@ -52,6 +52,9 @@ object LyriconFactory {
         centralPackageName
     )
 
+    @androidx.annotation.VisibleForTesting
+    internal var isForceSupported: Boolean = false
+
     /**
      * 使用完整 [ProviderInfo] 创建歌词提供端。
      *
@@ -68,7 +71,7 @@ object LyriconFactory {
         centralPackageName: String = ProviderConstants.SYSTEM_UI_PACKAGE_NAME,
     ): LyriconProvider {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 || isForceSupported) {
             initialize(context)
 
             return LyriconProviderImpl(
@@ -95,8 +98,8 @@ object LyriconFactory {
             Application.getProcessName()
         } else {
             val pid = android.os.Process.myPid()
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            am.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            am?.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName
         }
     }
 }

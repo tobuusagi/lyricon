@@ -23,6 +23,8 @@ internal class SubscriberServiceStub(
     private var connection: SubscriberConnection?
 ) : IRemoteService.Stub() {
 
+    override fun isBinderAlive(): Boolean = connection != null
+
     private val closed = AtomicBoolean(false)
     private val subscription = SubscriberSession(connection!!.subscriberInfo)
 

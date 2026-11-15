@@ -130,6 +130,29 @@ object StatusBarColorMonitor {
         activeStrategy?.onBindStatusBar(root)
     }
 
+    val currentStatusBarRoot: ViewGroup?
+        get() = statusBarRoot?.get()
+
+    val currentClockView: View?
+        get() = clockView?.get()
+
+    /**
+     * 检查当前是否绑定到指定状态栏根视图
+     */
+    fun isBoundTo(root: ViewGroup): Boolean = statusBarRoot?.get() === root
+
+    /**
+     * 解绑指定状态栏根视图(仅在绑定对象一致时生效，若传入 null 则在无匹配约束时清除)
+     *
+     * @param root 待解绑的状态栏根视图
+     */
+    fun unbindStatusBar(root: ViewGroup?) {
+        if (root == null || statusBarRoot?.get() === root) {
+            statusBarRoot = null
+            activeStrategy?.onBindStatusBar(null)
+        }
+    }
+
     /**
      * 绑定时钟视图
      *
@@ -159,6 +182,7 @@ object StatusBarColorMonitor {
      */
     fun addListener(listener: OnColorChangeListener) {
         if (listeners.addIfAbsent(listener)) {
+            lastFingerprint = null
             syncStrategy()
             refresh()
         }
@@ -217,24 +241,43 @@ object StatusBarColorMonitor {
     }
 
     /**
-     * 统一颜色上报入口(含指纹去重)
+     * 统一颜色上报入口(含指纹去重与暗色强度计算)
      *
      * @param color 实际颜色(黑/白或其插值)
+     * @param darkIntensity 暗色强度 (0.0=亮色图标/暗背景, 1.0=暗色图标/亮背景; 若为 -1 则由亮度推导)
      */
-    private fun emit(color: Int) {
+    fun emit(color: Int, darkIntensity: Float = -1f) {
         if (listeners.isEmpty()) return
 
-        val luminance = luminanceCache.getOrPut(color) {
-            ColorUtils.calculateLuminance(color).toFloat()
+        val intensity = if (darkIntensity in 0f..1f) {
+            darkIntensity
+        } else {
+            val luminance = luminanceCache.getOrPut(color) {
+                ColorUtils.calculateLuminance(color).toFloat()
+            }
+            (1f - luminance).coerceIn(0f, 1f)
         }
 
-        val fingerprint = "$color:$luminance"
+        val fingerprint = "$color:$intensity"
         if (fingerprint == lastFingerprint) return
         lastFingerprint = fingerprint
 
         listeners.forEach { listener ->
-            runCatching { listener.onColorChanged(color, luminance) }
+            runCatching { listener.onColorChanged(color, intensity) }
                 .onFailure { YLog.error(TAG, "Color listener callback failed", it) }
         }
+    }
+
+    fun resetForTesting() {
+        initialized = false
+        module = null
+        classLoader = null
+        activeStrategy?.onDeactivate()
+        activeStrategy = null
+        statusBarRoot = null
+        clockView = null
+        listeners.clear()
+        lastFingerprint = null
+        luminanceCache.clear()
     }
 }

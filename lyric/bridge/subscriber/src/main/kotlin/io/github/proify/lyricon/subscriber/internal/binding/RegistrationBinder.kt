@@ -25,6 +25,8 @@ internal class RegistrationBinder(
     private val subscriberInfo: SubscriberInfo
 ) : ISubscriberBinder.Stub() {
 
+    override fun isBinderAlive(): Boolean = true
+
     private val attempts = RegistrationAttempts<RegistrationAttempt>()
 
     private val serializedSubscriberInfo by lazy {

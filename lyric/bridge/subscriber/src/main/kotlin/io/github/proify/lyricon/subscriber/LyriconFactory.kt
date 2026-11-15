@@ -19,6 +19,9 @@ import io.github.proify.lyricon.subscriber.internal.registration.CentralBootRece
 /** 创建 [LyriconSubscriber] 的工厂。 */
 object LyriconFactory {
 
+    @androidx.annotation.VisibleForTesting
+    internal var isForceSupported: Boolean = false
+
     /**
      * 创建订阅端实例。
      *
@@ -37,7 +40,7 @@ object LyriconFactory {
             getCurrentProcessName(context).orEmpty().ifBlank { context.packageName }
         )
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 || isForceSupported) {
             LyriconSubscriberImpl(context, subscriberInfo)
         } else {
             EmptyLyriconSubscriber(subscriberInfo)
@@ -50,8 +53,8 @@ object LyriconFactory {
             Application.getProcessName()
         } else {
             val pid = android.os.Process.myPid()
-            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            am.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            am?.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName
         }
     }
 }

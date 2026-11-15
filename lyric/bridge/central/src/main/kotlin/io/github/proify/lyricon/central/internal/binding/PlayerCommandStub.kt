@@ -25,7 +25,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -60,17 +59,11 @@ internal class PlayerCommandStub(
     @Volatile
     private var positionUpdateInterval: Long = ProviderConstants.DEFAULT_POSITION_UPDATE_INTERVAL
 
-    /** 待解码的歌曲队列：保证 setSong 按到达顺序处理，避免并发解码乱序。 */
-    private val songQueue = Channel<ByteArray?>(Channel.UNLIMITED)
+    private val songLock = Any()
 
     init {
         positionTracker.manualPositionReader = positionMemory::readPosition
         ScreenStateMonitor.addListener(this)
-        scope.launch {
-            for (bytes in songQueue) {
-                processSong(bytes)
-            }
-        }
     }
 
     /** 关闭命令桩：停止轮询、释放共享内存与协程作用域。 */
@@ -79,7 +72,6 @@ internal class PlayerCommandStub(
         ScreenStateMonitor.removeListener(this)
         stopPositionUpdate()
 
-        songQueue.cancel()
         scope.launch {
             closeMutex.withLock {
                 positionMemory.close()
@@ -114,8 +106,10 @@ internal class PlayerCommandStub(
     override fun setSong(bytes: ByteArray?) {
         if (closed.get()) return
 
-        // 入队顺序与调用顺序一致；解码在单消费者中按序完成。
-        songQueue.trySend(bytes)
+        // 同步解码并更新会话歌曲，保证随后的播放状态或跳转切换能立即持有最新歌曲快照
+        synchronized(songLock) {
+            processSong(bytes)
+        }
     }
 
     override fun setPlaybackState(isPlaying: Boolean) {

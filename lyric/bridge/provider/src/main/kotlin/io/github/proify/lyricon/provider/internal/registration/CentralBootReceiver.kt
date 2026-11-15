@@ -50,6 +50,12 @@ internal object CentralBootReceiver {
         listeners.remove(listener)
     }
 
+    @androidx.annotation.VisibleForTesting
+    fun resetForTesting() {
+        listeners.clear()
+        isInitialized = false
+    }
+
     /**
      * 执行广播接收器的初始化与系统注册。
      *

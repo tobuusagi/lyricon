@@ -75,6 +75,7 @@ internal class LyriconProviderImpl(
         }
 
     override val service: RemoteService = connection
+    internal val centralConnection: CentralConnection get() = connection
     override val player: RemotePlayer get() = service.player
     override var autoSync: Boolean = true
 

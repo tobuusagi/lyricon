@@ -59,6 +59,8 @@ internal class ProviderConnection(
         if (closed.get()) return false
         binder = newBinder
         deathTracker.track(newBinder.asBinder())
+        activePlayers.notifyProviderInvalid(providerInfo)
+        service.renewPlayer()
         true
     }
 

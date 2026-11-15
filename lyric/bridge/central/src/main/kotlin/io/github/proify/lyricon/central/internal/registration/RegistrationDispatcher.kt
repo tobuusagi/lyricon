@@ -92,12 +92,14 @@ internal class RegistrationDispatcher(
 
     /** 从广播中解析指定类型的注册 Binder。 */
     private inline fun <reified T> getBinder(intent: Intent): T? = runCatching {
-        val binder = intent.getBundleExtra(CentralConstants.EXTRA_BUNDLE)
-            ?.getBinder(CentralConstants.EXTRA_BINDER) ?: return null
+        val binder = (intent as? io.github.proify.lyricon.central.RegistrationIntent)?.binder
+            ?: intent.getBundleExtra(CentralConstants.EXTRA_BUNDLE)
+                ?.getBinder(CentralConstants.EXTRA_BINDER)
+            ?: return null
 
         when (T::class) {
-            IProviderBinder::class -> IProviderBinder.Stub.asInterface(binder) as? T
-            ISubscriberBinder::class -> ISubscriberBinder.Stub.asInterface(binder) as? T
+            IProviderBinder::class -> (binder as? T) ?: (IProviderBinder.Stub.asInterface(binder) as? T)
+            ISubscriberBinder::class -> (binder as? T) ?: (ISubscriberBinder.Stub.asInterface(binder) as? T)
             else -> {
                 Log.e(TAG, "Unknown binder type: ${T::class.java.simpleName}")
                 null

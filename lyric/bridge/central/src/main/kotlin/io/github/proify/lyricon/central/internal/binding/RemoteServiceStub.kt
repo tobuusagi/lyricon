@@ -21,12 +21,19 @@ internal class RemoteServiceStub(
     private var connection: ProviderConnection? = null
 ) : IRemoteService.Stub() {
 
+    override fun isBinderAlive(): Boolean = connection != null
+
     /** 提供端的播放命令桩。 */
     private var player: PlayerCommandStub? = connection?.let {
         PlayerCommandStub(it.providerInfo, CentralRuntime.activePlayers)
     }
 
     override fun getPlayer(): PlayerCommandStub? = player
+
+    fun renewPlayer() {
+        player?.close()
+        player = connection?.let { PlayerCommandStub(it.providerInfo, CentralRuntime.activePlayers) }
+    }
 
     /** 关闭播放命令桩并释放连接引用。 */
     fun close() {

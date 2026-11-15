@@ -91,15 +91,20 @@ internal class RegistrationCoordinator(
         wantsConnection = true
         registrationBinder.beginAttempt(attempt)
         scheduleTimeout()
-        context.sendBroadcast(Intent(ACTION_REGISTER_PROVIDER).apply {
-            setPackage(centralPackageName)
-            putExtra(
-                ProviderConstants.EXTRA_BUNDLE,
-                Bundle().apply {
-                    putBinder(EXTRA_BINDER, registrationBinder)
-                }
-            )
-        })
+        val dispatcher = broadcastDispatcher
+        if (dispatcher != null) {
+            dispatcher(context, ACTION_REGISTER_PROVIDER, registrationBinder)
+        } else {
+            context.sendBroadcast(Intent(ACTION_REGISTER_PROVIDER).apply {
+                setPackage(centralPackageName)
+                putExtra(
+                    ProviderConstants.EXTRA_BUNDLE,
+                    Bundle().apply {
+                        putBinder(EXTRA_BINDER, registrationBinder)
+                    }
+                )
+            })
+        }
         return true
     }
 
@@ -158,9 +163,15 @@ internal class RegistrationCoordinator(
         }
     }
 
-    private companion object {
+    companion object {
         private const val CONNECTION_TIMEOUT_MS = 4_000L
         private const val INITIAL_RETRY_DELAY_MS = 1_000L
         private const val MAX_RETRY_DELAY_MS = 30_000L
+
+        /**
+         * 单元测试 Seam：在 android.jar stub 环境中允许测试拦截并分发真实的提供端注册意图。
+         */
+        @androidx.annotation.VisibleForTesting
+        internal var broadcastDispatcher: ((Context, String, RegistrationBinder) -> Unit)? = null
     }
 }

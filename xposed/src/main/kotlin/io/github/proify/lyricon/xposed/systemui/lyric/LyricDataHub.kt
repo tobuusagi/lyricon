@@ -158,4 +158,19 @@ object LyricDataHub : ActivePlayerListener {
         this.providerInfo = providerInfo
         listeners.forEach { it.onActiveProviderChanged(providerInfo) }
     }
+
+    @get:androidx.annotation.VisibleForTesting
+    internal val cachedRawSongForTesting: Song? get() = cachedRawSong
+
+    @get:androidx.annotation.VisibleForTesting
+    internal val providerInfoForTesting: ProviderInfo? get() = providerInfo
+
+    @androidx.annotation.VisibleForTesting
+    fun resetForTesting() {
+        lastDispatchSongId = 0
+        cachedRawSong = null
+        providerInfo = null
+        activePipelineJob?.cancel()
+        activePipelineJob = null
+    }
 }

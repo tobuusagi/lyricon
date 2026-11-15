@@ -26,3 +26,12 @@ docs/.vitepress/dist/
 
 package.json
 package-lock.json
+
+# Local artifacts and secrets — do not publish
+/out/
+*.apk
+/materials/*.apk
+*.job.id
+*.submit.lock
+*.submission.json
+__pycache__/

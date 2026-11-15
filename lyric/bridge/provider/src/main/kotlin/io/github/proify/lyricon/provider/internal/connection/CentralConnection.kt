@@ -21,8 +21,10 @@ import io.github.proify.lyricon.provider.internal.player.AidlRemotePlayer
 import io.github.proify.lyricon.provider.internal.player.ResyncingPlayer
 import io.github.proify.lyricon.provider.isConnected
 import io.github.proify.lyricon.provider.service.RemoteService
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.CopyOnWriteArraySet
 
@@ -51,8 +53,17 @@ internal class CentralConnection(
     /** 连接状态机。 */
     private val machine = ConnectionStateMachine()
 
-    /** 监听器通知回调的主线程作用域。 */
-    private val callbackScope = CoroutineScope(Dispatchers.Main.immediate)
+    /** 监听器通知回调的作用域（优先主线程，JVM 单测环境回退至 Default）。 */
+    private val callbackScope: CoroutineScope by lazy {
+        val dispatcher = try {
+            val main = Dispatchers.Main
+            main.isDispatchNeeded(kotlin.coroutines.EmptyCoroutineContext)
+            main.immediate
+        } catch (_: Throwable) {
+            Dispatchers.Default
+        }
+        CoroutineScope(dispatcher + SupervisorJob())
+    }
 
     /** 状态转移与 Binder 操作互斥锁。 */
     private val transitionLock = Any()
@@ -92,6 +103,12 @@ internal class CentralConnection(
     /** 用户主动断开。 */
     fun disconnectByUser() {
         transition(ConnectionTrigger.USER_DISCONNECT)
+    }
+
+    /** 单元测试模拟服务断开（远端进程退出）。 */
+    @androidx.annotation.VisibleForTesting
+    internal fun simulateServiceLost() {
+        transition(ConnectionTrigger.SERVICE_LOST)
     }
 
     /** 接收中心服务返回的远端服务 Binder。 */

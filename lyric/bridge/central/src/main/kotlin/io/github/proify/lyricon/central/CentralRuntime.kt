@@ -15,8 +15,15 @@ import io.github.proify.lyricon.central.internal.subscriber.SubscriberDirectory
  * 中央运行时：全局单例的注册表与分发器集合。
  */
 internal object CentralRuntime {
-    val activePlayers = ActivePlayerHub()
-    val providers = ProviderDirectory(activePlayers)
-    val subscribers = SubscriberDirectory()
-    val registration = RegistrationDispatcher(providers, subscribers)
+    var activePlayers = ActivePlayerHub()
+    var providers = ProviderDirectory(activePlayers)
+    var subscribers = SubscriberDirectory()
+    var registration = RegistrationDispatcher(providers, subscribers)
+
+    fun resetForTesting() {
+        activePlayers = ActivePlayerHub()
+        providers = ProviderDirectory(activePlayers)
+        subscribers = SubscriberDirectory()
+        registration = RegistrationDispatcher(providers, subscribers)
+    }
 }

@@ -33,6 +33,8 @@ internal class RegistrationBinder(
     private val remoteServiceSink: RemoteServiceSink<IRemoteService?>,
 ) : IProviderBinder.Stub() {
 
+    override fun isBinderAlive(): Boolean = true
+
     /** 等待中的注册尝试登记表。 */
     private val attempts = RegistrationAttempts<RegistrationAttempt>()
 

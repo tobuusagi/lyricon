@@ -147,8 +147,10 @@ class CompatSetTextColorStrategy : StatusColorStrategy {
      * @param tv 发生颜色变化的 TextView 实例
      */
     private fun afterSetColor(tv: TextView) {
+        if (this.emit == null) return
         val root = statusBarRoot?.get() ?: return
-        if (tv.rootView !== root || isInLyricSubtree(tv)) return
+        if (!isDescendantOf(tv, root) && tv !== clockView?.get()) return
+        if (isInLyricSubtree(tv)) return
 
         val color = tv.currentTextColor
         if (color == 0) return
@@ -157,13 +159,26 @@ class CompatSetTextColorStrategy : StatusColorStrategy {
         reportMainColor()
     }
 
+    private fun isDescendantOf(child: View, ancestor: ViewGroup): Boolean {
+        if (child === ancestor) return true
+        var cur: ViewParent? = child.parent
+        while (cur != null) {
+            if (cur === ancestor) return true
+            cur = cur.parent
+        }
+        return false
+    }
+
     /**
      * 聚合状态栏 TextView 的主色并上报
      */
     private fun reportMainColor() {
         val emit = this.emit ?: return
 
-        val color = computeMainColor() ?: return
+        val color = computeMainColor() ?: run {
+            YLog.warning(TAG, "No valid status bar color signal bound; failing openly without fake fallback")
+            return
+        }
         emit(color)
     }
 

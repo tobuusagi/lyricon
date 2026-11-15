@@ -14,10 +14,13 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * 状态栏视图管理器 (StatusBar View Manager)
  *
- * 该单例负责管理所有 [StatusBarViewController] 的生命周期，并提供统一的线程调度与遍历接口。
- * 使用 [CopyOnWriteArrayList] 确保在主线程遍历与异步生命周期变动时的线程安全。
+ * 该单例负责管理所有 [StatusBarViewController] 的生命周期。
+ * 遵循 DP11 设计要求：
+ * 1. 同一宿主 (PhoneStatusBarView 身份) 的重复回调仅创建一个控制器（幂等去重）；
+ * 2. 同一 displayId 出现新宿主（如旋屏、布局重建）时，挂载新宿主并完全注销/销毁旧宿主；
+ * 3. 宿主脱落或移除时触发 onDestroy，移除歌词视图、注销监听器并清理可见性缓存。
  *
- * @author Tomakino
+ * @author Tomakino, Proify
  * @since 2026
  */
 @Suppress("unused")
@@ -25,7 +28,23 @@ object StatusBarViewManager {
     const val TAG = "StatusBarViewManager"
 
     /** 全局主线程 Looper */
-    val MAIN_LOOPER: Looper by lazy { Looper.getMainLooper() }
+    val MAIN_LOOPER: Looper by lazy {
+        try {
+            Looper.getMainLooper()
+        } catch (_: Throwable) {
+            null
+        } ?: run {
+            try {
+                val unsafeClass = Class.forName("sun.misc.Unsafe")
+                val theUnsafe = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }.get(null)
+                val allocateInstance = unsafeClass.getMethod("allocateInstance", Class::class.java)
+                allocateInstance.invoke(theUnsafe, Looper::class.java) as Looper
+            } catch (_: Throwable) {
+                val ctor = Looper::class.java.getDeclaredConstructor().apply { isAccessible = true }
+                ctor.newInstance()
+            }
+        }
+    }
 
     /** 全局主线程 Handler */
     val mainHandler by lazy { Handler(MAIN_LOOPER) }
@@ -38,27 +57,46 @@ object StatusBarViewManager {
 
     /**
      * 注册并初始化控制器。
-     * 如果控制器尚未注册，则将其添加到集合中并触发 [StatusBarViewController.onCreate]。
      *
-     * @param controller 需要注册的 [StatusBarViewController] 实例
+     * 检查：
+     * 1. 若同一 statusBarView 宿主已存在控制器，则直接忽略（幂等去重）；
+     * 2. 若同一 displayId 已存在其他旧宿主的控制器，则注销并销毁旧控制器；
+     * 3. 添加新控制器并执行 [StatusBarViewController.onCreate]。
      */
     fun add(controller: StatusBarViewController) {
-        if (_controllers.addIfAbsent(controller)) {
-            runOnMainThread {
-                controller.onCreate()
-                Log.d(TAG, "Successfully added and created controller: $controller")
+        synchronized(this) {
+            // 1. 同一 host 幂等去重
+            val existingIdentical = _controllers.find { it.statusBarView === controller.statusBarView }
+            if (existingIdentical != null) {
+                Log.d(TAG, "Controller for host ${controller.statusBarView} already exists, ignoring duplicate add")
+                return
             }
+
+            // 2. 同一 displayId 替换重建宿主
+            val targetDisplayId = controller.displayId
+            val oldControllerOnSameDisplay = _controllers.find { it.displayId == targetDisplayId }
+            if (oldControllerOnSameDisplay != null) {
+                Log.i(TAG, "Retiring replaced controller for display $targetDisplayId: $oldControllerOnSameDisplay")
+                remove(oldControllerOnSameDisplay)
+            }
+
+            // 3. 注册新控制器
+            _controllers.add(controller)
+        }
+
+        runOnMainThread {
+            controller.onCreate()
+            Log.d(TAG, "Successfully added and created controller: $controller on display ${controller.displayId}")
         }
     }
 
     /**
      * 移除并销毁控制器。
-     * 如果控制器已注册，则从集合中移除并触发 [StatusBarViewController.onDestroy]。
-     *
-     * @param controller 需要移除的 [StatusBarViewController] 实例
+     * 从集合中移除并触发 [StatusBarViewController.onDestroy]。
      */
     fun remove(controller: StatusBarViewController) {
-        if (_controllers.remove(controller)) {
+        val removed = _controllers.remove(controller)
+        if (removed) {
             runOnMainThread {
                 controller.onDestroy()
                 Log.d(TAG, "Successfully removed and destroyed controller: $controller")
@@ -67,9 +105,24 @@ object StatusBarViewManager {
     }
 
     /**
-     * 执行遍历操作。
-     * 注意：此方法在调用者当前线程执行。
-     * @param block 针对每个控制器执行的操作块
+     * 清空并销毁所有控制器（如服务重启或单元测试重置）
+     */
+    fun clear() {
+        val list = ArrayList(_controllers)
+        _controllers.clear()
+        runOnMainThread {
+            for (controller in list) {
+                try {
+                    controller.onDestroy()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error destroying controller during clear: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * 执行遍历操作（在调用者当前线程执行）。
      */
     inline fun forEach(crossinline block: (StatusBarViewController) -> Unit) {
         val currentList = controllers
@@ -84,9 +137,6 @@ object StatusBarViewManager {
 
     /**
      * 确保在主线程安全地遍历所有控制器。
-     * 适用于 UI 状态更新、显示/隐藏等低频操作。
-     *
-     * @param block 针对每个控制器执行的操作块
      */
     inline fun forEachOnMainThread(crossinline block: (StatusBarViewController) -> Unit) {
         runOnMainThread {
@@ -96,12 +146,13 @@ object StatusBarViewManager {
 
     /**
      * 线程调度辅助方法。
-     * 如果当前线程已是主线程，则同步立即执行；否则邮寄至消息队列。
-     *
-     * @param action 需要执行的匿名函数块
      */
     inline fun runOnMainThread(crossinline action: () -> Unit) {
-        if (Thread.currentThread() === MAIN_LOOPER.thread) {
+        val looper = try { Looper.getMainLooper() } catch (_: Throwable) { null }
+        val isMain = looper == null ||
+                Looper.myLooper() === looper ||
+                Thread.currentThread() === looper.thread
+        if (isMain) {
             action()
         } else {
             mainHandler.post { action() }

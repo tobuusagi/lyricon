@@ -6,6 +6,7 @@
 
 package io.github.proify.lyricon.xposed.systemui
 
+import android.content.Context
 import android.os.Bundle
 import android.view.ViewGroup
 import androidx.core.view.doOnAttach
@@ -54,11 +55,66 @@ object SystemUIHooker : PackageHooker() {
     private var isAppCreated = false
 
     var subscriber: LyriconSubscriber? = null
-        private set
+        internal set
 
-    private val mainCoroutineScope by lazy {
-        CoroutineScope(Dispatchers.Main + SupervisorJob())
+    var subscriberConnectionListener: ConnectionListener? = null
+        internal set
+
+    internal fun isCoreServiceDisabled(): Boolean {
+        return try {
+            ModuleEntry.instance.getRemotePreferences("default").getBoolean("core_service_disable", false)
+        } catch (t: Throwable) {
+            false
+        }
     }
+
+    /**
+     * SystemUIHooker 生产环境中向订阅端安装的连接监听器。
+     * 在订阅端连接 (onConnected) 或重新连接 (onReconnected) 时，
+     * 触发 BridgeCentral.sendBootCompleted() 向全系统广播恢复信号，
+     * 使已在后台运行的播放器提供端重新向中央注册并回放当前播放会话。
+     */
+    internal class SystemUIConnectionListener(
+        private val isCoreServiceDisabled: () -> Boolean
+    ) : ConnectionListener {
+        override fun onConnected(subscriber: LyriconSubscriber) {
+            YLog.info(TAG, "lyriconSubscriber onConnected")
+            if (!isCoreServiceDisabled()) {
+                BridgeCentral.sendBootCompleted()
+            }
+        }
+
+        override fun onReconnected(subscriber: LyriconSubscriber) {
+            YLog.info(TAG, "lyriconSubscriber onReconnected")
+            if (!isCoreServiceDisabled()) {
+                BridgeCentral.sendBootCompleted()
+            }
+        }
+
+        override fun onDisconnected(subscriber: LyriconSubscriber) {
+            YLog.info(TAG, "lyriconSubscriber onDisconnected")
+        }
+
+        override fun onConnectTimeout(subscriber: LyriconSubscriber) {
+            YLog.info(TAG, "lyriconSubscriber onConnectTimeout")
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal var customCoroutineScope: CoroutineScope? = null
+
+    private val mainCoroutineScope: CoroutineScope
+        get() {
+            customCoroutineScope?.let { return it }
+            val dispatcher = try {
+                val main = Dispatchers.Main
+                main.isDispatchNeeded(kotlin.coroutines.EmptyCoroutineContext)
+                main
+            } catch (_: Throwable) {
+                Dispatchers.Default
+            }
+            return CoroutineScope(dispatcher + SupervisorJob())
+        }
 
     override fun onHook() {
         YLog.info(TAG, "onHook")
@@ -141,6 +197,11 @@ object SystemUIHooker : PackageHooker() {
         initLyriconService()
 
         StatusBarDisableHooker.inject(module, classLoader)
+        if (!StatusBarDisableHooker.isAvailable) {
+            YLog.error(TAG, "StatusBarDisableHooker capability is unavailable; disable-state tracking degraded", StatusBarDisableHooker.lastError)
+        } else if (StatusBarDisableHooker.primaryError != null) {
+            YLog.info(TAG, "StatusBarDisableHooker active via fallback; primary CommandQueue error retained: ${StatusBarDisableHooker.primaryError?.message}")
+        }
         StatusBarDisableHooker.addListener(object :
             StatusBarDisableHooker.OnStatusBarDisableListener {
             private var lastDisableStateChanged: Boolean? = null
@@ -148,7 +209,7 @@ object SystemUIHooker : PackageHooker() {
             override fun onDisableStateChanged(shouldHide: Boolean, animate: Boolean) {
                 if (lastDisableStateChanged == shouldHide) return
                 lastDisableStateChanged = shouldHide
-                StatusBarViewManager.forEach { it.onDisableStateChanged(shouldHide) }
+                StatusBarViewManager.forEachOnMainThread { it.onDisableStateChanged(shouldHide) }
             }
         })
 
@@ -158,12 +219,9 @@ object SystemUIHooker : PackageHooker() {
         StatusBarViewResolver.init(module, context)
     }
 
-    private fun initLyriconService() {
-        val context = appContext ?: return
-
-        val service = ModuleEntry.instance
-        val defaultSp = service.getRemotePreferences("default")
-        val coreServiceDisable = defaultSp.getBoolean("core_service_disable", false)
+    internal fun initLyriconService(targetContext: Context? = null) {
+        val context = targetContext ?: appContext ?: return
+        val coreServiceDisable = isCoreServiceDisabled()
 
         if (!coreServiceDisable) {
             BridgeCentral.initialize(context)
@@ -172,33 +230,26 @@ object SystemUIHooker : PackageHooker() {
             YLog.info(TAG, "已禁用内置中心服务")
         }
 
-        val subscriber = LyriconFactory.createSubscriber(appContext!!)
+        val subscriber = LyriconFactory.createSubscriber(context)
         this.subscriber = subscriber
 
         subscriber.subscribeActivePlayer(LyricDataHub)
+        io.github.proify.lyricon.xposed.systemui.lyric.LyricViewController // 确保单例初始化并注册到 LyricDataHub
 
-        subscriber.addConnectionListener(object : ConnectionListener {
-            override fun onConnected(subscriber: LyriconSubscriber) {
-                YLog.info(TAG, "lyriconSubscriber onConnected")
-            }
-
-            override fun onReconnected(subscriber: LyriconSubscriber) {
-                YLog.info(TAG, "lyriconSubscriber onReconnected")
-            }
-
-            override fun onDisconnected(subscriber: LyriconSubscriber) {
-                YLog.info(TAG, "lyriconSubscriber onDisconnected")
-            }
-
-            override fun onConnectTimeout(subscriber: LyriconSubscriber) {
-                YLog.info(TAG, "lyriconSubscriber onConnectTimeout")
-            }
-
-        })
+        val listener = SystemUIConnectionListener { coreServiceDisable }
+        this.subscriberConnectionListener = listener
+        subscriber.addConnectionListener(listener)
         mainCoroutineScope.launch {
             delay(2000)
             subscriber.register()
         }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun resetForTesting() {
+        subscriber = null
+        subscriberConnectionListener = null
+        customCoroutineScope = null
     }
 
     private fun initDataChannel() {
@@ -238,14 +289,21 @@ object SystemUIHooker : PackageHooker() {
      * 将自定义控制器绑定到状态栏视图
      */
     private fun addStatusBarView(view: ViewGroup) {
-        view.doOnAttach {
-            val target = view.rootView as? ViewGroup ?: return@doOnAttach
-            val controller = StatusBarViewController(target, LyricPrefs.getLyricStyle())
+        val attachAndAdd = {
+            // 严格绑定到解析出的 PhoneStatusBarView 宿主，而非 view.rootView
+            val controller = StatusBarViewController(view, LyricPrefs.getLyricStyle())
             StatusBarViewManager.add(controller)
 
             val isFirst = StatusBarViewManager.controllers.size == 1
             if (isFirst) {
-                if (TEST_CRASH) target.postDelayed({ error("test crash") }, 3000)
+                if (TEST_CRASH) view.postDelayed({ error("test crash") }, 3000)
+            }
+        }
+        if (view.isAttachedToWindow) {
+            attachAndAdd()
+        } else {
+            view.doOnAttach {
+                attachAndAdd()
             }
         }
     }
